@@ -176,6 +176,38 @@ def main():
         except Exception as e:
             print(f"❌ Error listing field paths with missing type: {e}")
         
+        print("\n🔍 Debug test for nested subfields...")
+        try:
+            # Create a simple field structure step by step
+            print("Creating root field 'debug_field'...")
+            root_field = client.create_field_by_path("test_cluster_path/test_db_path/test_table_path/debug_field")
+            print(f"✅ Root field created: {root_field['name']}, id: {root_field['id']}")
+            
+            print("Creating subfield 'debug_subfield'...")
+            subfield = client.create_field_by_path("test_cluster_path/test_db_path/test_table_path/debug_field/debug_subfield")
+            print(f"✅ Subfield created: {subfield['name']}, id: {subfield['id']}, parent_id: {subfield.get('parent_id')}")
+            
+            print("Creating nested subfield 'debug_nested'...")
+            nested = client.create_field_by_path("test_cluster_path/test_db_path/test_table_path/debug_field/debug_subfield/debug_nested")
+            print(f"✅ Nested subfield created: {nested['name']}, id: {nested['id']}, parent_id: {nested.get('parent_id')}")
+
+            
+            print("Creating nested subfield 'debug_nested'...")
+            nested = client.create_field_by_path("test_cluster_path/test_db_path/test_table_path/debug_field/debug_subfield/debug_nested/debugnest2")
+            print(f"✅ Nested subfield created: {nested['name']}, id: {nested['id']}, parent_id: {nested.get('parent_id')}")
+            
+            # List all fields to see the structure
+            print("Listing all fields in table...")
+            all_paths = client.list_field_paths_by_table_path("test_cluster_path", "test_db_path", "test_table_path")
+            for p in all_paths:
+                if "debug" in p:
+                    print(f"   - {p}")
+                    
+        except Exception as e:
+            print(f"❌ Debug test failed: {e}")
+            import traceback
+            traceback.print_exc()
+        
     except Exception as e:
         print(f"❌ Test failed with error: {e}")
         import traceback

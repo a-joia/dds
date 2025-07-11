@@ -245,10 +245,12 @@ def create_field_by_path(field_path: str, data: dict = Body(...), db: Session = 
     if table_id is None:
         raise HTTPException(status_code=404, detail="Table not found for path")
     parent_id = None
-    for name in field_names[:-1]:
-        parent_id = get_field_id_by_path(db, cluster, database, table, *(field_names[:field_names.index(name)+1]))
+    # Build the parent path step by step
+    for i in range(len(field_names) - 1):
+        current_path = field_names[:i+1]
+        parent_id = get_field_id_by_path(db, cluster, database, table, *current_path)
         if parent_id is None:
-            raise HTTPException(status_code=404, detail=f"Parent field '{name}' not found")
+            raise HTTPException(status_code=404, detail=f"Parent field '{field_names[i]}' not found")
     # Create the field
     from . import schemas
     field_create = schemas.FieldCreate(name=field_names[-1], parent_id=parent_id, meta=data)

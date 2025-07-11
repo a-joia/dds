@@ -207,106 +207,18 @@ class DBDescClient:
                 f"Expected format: 'cluster/database/table/field' or 'cluster/database/table/field/subfield/...'"
             )
         
-        cluster_name = parts[0]
-        database_name = parts[1]
-        table_name = parts[2]
-        field_path = parts[3:]
+        # Use the server-side path-based endpoint
+        data = meta if meta is not None else {}
+        resp = requests.post(f"{self.base_url}/fields/by-path/{path}", json=data)
+        if not resp.ok:
+            # Try to provide a helpful error message
+            try:
+                error_detail = resp.json().get('detail', resp.text)
+                raise ValueError(error_detail)
+            except:
+                raise ValueError(f"Failed to create field: {resp.text}")
         
-        # Check if cluster exists
-        clusters = self.get_clusters()
-        cluster = None
-        for c in clusters:
-            if c['name'] == cluster_name:
-                cluster = c
-                break
-        
-        if not cluster:
-            available_clusters = [c['name'] for c in clusters]
-            raise ValueError(
-                f"Cluster '{cluster_name}' does not exist.\n"
-                f"Available clusters: {available_clusters}\n"
-                f"Path provided: '{path}'\n"
-                f"Please create the cluster first or use an existing cluster name."
-            )
-        
-        # Check if database exists
-        databases = self.get_databases(cluster['id'])
-        database = None
-        for db in databases:
-            if db['name'] == database_name:
-                database = db
-                break
-        
-        if not database:
-            available_databases = [db['name'] for db in databases]
-            raise ValueError(
-                f"Database '{database_name}' does not exist in cluster '{cluster_name}'.\n"
-                f"Available databases in cluster '{cluster_name}': {available_databases}\n"
-                f"Path provided: '{path}'\n"
-                f"Please create the database first or use an existing database name."
-            )
-        
-        # Check if table exists
-        tables = self.get_tables(database['id'])
-        table = None
-        for t in tables:
-            if t['name'] == table_name:
-                table = t
-                break
-        
-        if not table:
-            available_tables = [t['name'] for t in tables]
-            raise ValueError(
-                f"Table '{table_name}' does not exist in database '{database_name}' (cluster '{cluster_name}').\n"
-                f"Available tables in database '{database_name}': {available_tables}\n"
-                f"Path provided: '{path}'\n"
-                f"Please create the table first or use an existing table name."
-            )
-        
-        # Create field or subfield
-        parent_id = None
-        
-        # If we have subfields, we need to traverse the field hierarchy
-        if len(field_path) > 1:
-            # Get all fields in the table
-            all_fields = self.get_fields(table['id'])
-            
-            # Traverse the field path to find the parent
-            for i, field_name in enumerate(field_path[:-1]):
-                # Find the field with this name and the correct parent
-                found_field = None
-                for field in all_fields:
-                    if field['name'] == field_name and field.get('parent_id') == parent_id:
-                        found_field = field
-                        break
-                
-                if not found_field:
-                    # Build a helpful error message
-                    if parent_id is None:
-                        available_fields = [f['name'] for f in all_fields if f.get('parent_id') is None]
-                        error_msg = f"Field '{field_name}' does not exist at the root level of table '{table_name}'."
-                    else:
-                        # Find the parent field name for better error message
-                        parent_field_name = "unknown"
-                        for field in all_fields:
-                            if field['id'] == parent_id:
-                                parent_field_name = field['name']
-                                break
-                        available_subfields = [f['name'] for f in all_fields if f.get('parent_id') == parent_id]
-                        error_msg = f"Subfield '{field_name}' does not exist under field '{parent_field_name}' in table '{table_name}'."
-                    
-                    raise ValueError(
-                        f"{error_msg}\n"
-                        f"Path provided: '{path}'\n"
-                        f"Failed at: '{'/'.join(parts[:3 + i + 1])}'\n"
-                        f"Please create the missing field first or use an existing field name."
-                    )
-                
-                parent_id = found_field['id']
-        
-        # Create the final field/subfield
-        field_name = field_path[-1]
-        return self.create_field(table['id'], field_name, parent_id=parent_id, meta=meta)
+        return resp.json()
 
     def list_field_paths_by_table_path(self, cluster: str, database: str, table: str) -> List[str]:
         """
