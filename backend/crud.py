@@ -455,3 +455,54 @@ def get_table_graph_data(db: Session, table_id: int) -> dict:
         "edges": edge_list,
         "external_connections": external_connections
     } 
+
+def list_field_paths_by_table_path(db, cluster: str, database: str, table: str) -> list:
+    """
+    Return a list of all field and subfield paths under the given table, in the format:
+    cluster/database/table/field
+    cluster/database/table/field/subfield
+    ...
+    """
+    table_id = get_table_id_by_path(db, cluster, database, table)
+    if table_id is None:
+        return []
+    all_fields = db.query(models.Field).filter(models.Field.table_id == table_id).all()
+    paths = []
+    for field in all_fields:
+        path = get_field_path_by_id(db, field.id)
+        paths.append(path)
+    return paths 
+
+def list_field_paths_with_empty_description_by_table_path(db, cluster: str, database: str, table: str) -> list:
+    """
+    Return a list of all field and subfield paths under the given table where the description is empty or missing.
+    """
+    table_id = get_table_id_by_path(db, cluster, database, table)
+    if table_id is None:
+        return []
+    all_fields = db.query(models.Field).filter(models.Field.table_id == table_id).all()
+    paths = []
+    for field in all_fields:
+        meta = field.meta if isinstance(field.meta, dict) else {}
+        desc = meta.get('description', None)
+        if desc is None or (isinstance(desc, str) and desc.strip() == ""):
+            path = get_field_path_by_id(db, field.id)
+            paths.append(path)
+    return paths 
+
+def list_field_paths_without_type_by_table_path(db, cluster: str, database: str, table: str) -> list:
+    """
+    Return a list of all field and subfield paths under the given table where the 'type' in meta is missing or empty.
+    """
+    table_id = get_table_id_by_path(db, cluster, database, table)
+    if table_id is None:
+        return []
+    all_fields = db.query(models.Field).filter(models.Field.table_id == table_id).all()
+    paths = []
+    for field in all_fields:
+        meta = field.meta if isinstance(field.meta, dict) else {}
+        t = meta.get('type', None)
+        if t is None or (isinstance(t, str) and t.strip() == ""):
+            path = get_field_path_by_id(db, field.id)
+            paths.append(path)
+    return paths 

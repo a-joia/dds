@@ -126,6 +126,56 @@ def main():
         
         print("\n🎉 All path-based function tests completed!")
         
+        print("\n🧪 Testing list_field_paths_by_table_path()...")
+        try:
+            paths = client.list_field_paths_by_table_path("test_cluster_path", "test_db_path", "test_table_path")
+            print(f"✅ Field paths under test_cluster_path/test_db_path/test_table_path:")
+            for p in paths:
+                print(f"   - {p}")
+        except Exception as e:
+            print(f"❌ Error listing field paths: {e}")
+        
+        print("\n🧪 Testing list_field_paths_with_empty_description_by_table_path()...")
+        try:
+            empty_desc_paths = client.list_field_paths_with_empty_description_by_table_path("test_cluster_path", "test_db_path", "test_table_path")
+            print(f"✅ Field paths with empty description under test_cluster_path/test_db_path/test_table_path:")
+            for p in empty_desc_paths:
+                print(f"   - {p}")
+        except Exception as e:
+            print(f"❌ Error listing field paths with empty description: {e}")
+        
+        print("\n🧪 Testing get_field_info_by_path()...")
+        try:
+            info = client.get_field_info_by_path("test_cluster_path/test_db_path/test_table_path/test_field_path")
+            print(f"✅ Info for test_field_path:")
+            print(info)
+        except Exception as e:
+            print(f"❌ Error getting field info by path: {e}")
+        
+        print("\n🧪 Testing create_field_by_path() with metadata and get_field_info_by_path()...")
+        try:
+            meta = {"description": "A field with metadata", "type": "string"}
+            field_with_meta = client.create_field_by_path(
+                "test_cluster_path/test_db_path/test_table_path/field_with_meta2",
+                meta=meta
+            )
+            info = client.get_field_info_by_path("test_cluster_path/test_db_path/test_table_path/field_with_meta2")
+            print(f"✅ Info for field_with_meta2:")
+            print(info)
+            assert info["meta"].get("description") == "A field with metadata"
+            assert info["meta"].get("type") == "string"
+        except Exception as e:
+            print(f"❌ Error with metadata test: {e}")
+        
+        print("\n🧪 Testing list_field_paths_without_type_by_table_path()...")
+        try:
+            missing_type_paths = client.list_field_paths_without_type_by_table_path("test_cluster_path", "test_db_path", "test_table_path")
+            print(f"✅ Field paths with missing type under test_cluster_path/test_db_path/test_table_path:")
+            for p in missing_type_paths:
+                print(f"   - {p}")
+        except Exception as e:
+            print(f"❌ Error listing field paths with missing type: {e}")
+        
     except Exception as e:
         print(f"❌ Test failed with error: {e}")
         import traceback

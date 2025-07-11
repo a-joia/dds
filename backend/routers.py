@@ -289,4 +289,58 @@ def delete_cluster_endpoint(cluster_id: int, db: Session = Depends(deps.get_db))
 @router.get("/tables/{table_id}/graph/")
 def get_table_graph(table_id: int, db: Session = Depends(deps.get_db)):
     """Get graph data for a table including all fields and their edges."""
-    return crud.get_table_graph_data(db, table_id) 
+    return crud.get_table_graph_data(db, table_id)
+
+@router.get("/fields/by-table-path/{cluster}/{database}/{table}")
+def list_fields_by_table_path(cluster: str, database: str, table: str, db: Session = Depends(deps.get_db)):
+    """
+    List all fields and subfields under the specified table, returning their full paths.
+    """
+    paths = crud.list_field_paths_by_table_path(db, cluster, database, table)
+    if not paths:
+        raise HTTPException(status_code=404, detail="Table not found or no fields present")
+    return {"paths": paths}
+
+@router.get("/fields/by-table-path/{cluster}/{database}/{table}/empty-description")
+def list_fields_with_empty_description_by_table_path(cluster: str, database: str, table: str, db: Session = Depends(deps.get_db)):
+    """
+    List all fields and subfields under the specified table where the description is empty or missing.
+    """
+    paths = crud.list_field_paths_with_empty_description_by_table_path(db, cluster, database, table)
+    if not paths:
+        return {"paths": []}
+    return {"paths": paths}
+
+@router.get("/fields/by-table-path/{cluster}/{database}/{table}/missing-type")
+def list_fields_without_type_by_table_path(cluster: str, database: str, table: str, db: Session = Depends(deps.get_db)):
+    """
+    List all fields and subfields under the specified table where the 'type' in meta is missing or empty.
+    """
+    paths = crud.list_field_paths_without_type_by_table_path(db, cluster, database, table)
+    if not paths:
+        return {"paths": []}
+    return {"paths": paths}
+
+@router.get("/fields/by-path/{field_path:path}/info")
+def get_field_info_by_path(field_path: str, db: Session = Depends(deps.get_db)):
+    """
+    Return all information about the field or subfield node given its path.
+    """
+    parts = field_path.split('/')
+    if len(parts) < 4:
+        raise HTTPException(status_code=400, detail="Field path must include at least cluster/database/table/field")
+    field_id = get_field_id_by_path(db, *parts)
+    if field_id is None:
+        raise HTTPException(status_code=404, detail="Field not found for path")
+    field = db.query(crud.models.Field).filter(crud.models.Field.id == field_id).first()
+    if not field:
+        raise HTTPException(status_code=404, detail="Field not found")
+    # Convert SQLAlchemy model to dict
+    info = {
+        "id": field.id,
+        "name": field.name,
+        "meta": field.meta,
+        "parent_id": field.parent_id,
+        "table_id": field.table_id,
+    }
+    return info 

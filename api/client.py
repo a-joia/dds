@@ -324,6 +324,14 @@ class DBDescClient:
         resp.raise_for_status()
         return resp.json().get("paths", [])
 
+    def list_field_paths_without_type_by_table_path(self, cluster: str, database: str, table: str) -> List[str]:
+        """
+        List all field and subfield paths under the specified table where the 'type' in meta is missing or empty.
+        """
+        resp = requests.get(f"{self.base_url}/fields/by-table-path/{cluster}/{database}/{table}/missing-type")
+        resp.raise_for_status()
+        return resp.json().get("paths", [])
+
     def get_field_info_by_path(self, path: str) -> dict:
         """
         Get all information about a field or subfield node given its path (cluster/database/table/field[/subfield...]).
