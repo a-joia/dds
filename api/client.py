@@ -308,6 +308,30 @@ class DBDescClient:
         field_name = field_path[-1]
         return self.create_field(table['id'], field_name, parent_id=parent_id, meta=meta)
 
+    def list_field_paths_by_table_path(self, cluster: str, database: str, table: str) -> List[str]:
+        """
+        List all field and subfield paths under the specified table.
+        """
+        resp = requests.get(f"{self.base_url}/fields/by-table-path/{cluster}/{database}/{table}")
+        resp.raise_for_status()
+        return resp.json().get("paths", [])
+
+    def list_field_paths_with_empty_description_by_table_path(self, cluster: str, database: str, table: str) -> List[str]:
+        """
+        List all field and subfield paths under the specified table where the description is empty or missing.
+        """
+        resp = requests.get(f"{self.base_url}/fields/by-table-path/{cluster}/{database}/{table}/empty-description")
+        resp.raise_for_status()
+        return resp.json().get("paths", [])
+
+    def get_field_info_by_path(self, path: str) -> dict:
+        """
+        Get all information about a field or subfield node given its path (cluster/database/table/field[/subfield...]).
+        """
+        resp = requests.get(f"{self.base_url}/fields/by-path/{path}/info")
+        resp.raise_for_status()
+        return resp.json()
+
 BASE_URL = 'http://localhost:8000'
 
 def add_equivalence(from_path: str, to_path: str):
@@ -573,6 +597,8 @@ def print_hierarchy_by_path(path: str, indent: int = 0):
         print_hierarchy_by_path("mycluster")  # Shows all databases, tables, fields
         print_hierarchy_by_path("mycluster/mydb")  # Shows all tables, fields
         print_hierarchy_by_path("mycluster/mydb/mytable")  # Shows all fields
+    Output:
+        The hierarchy of paths idented by space character
     """
     parts = path.split('/')
     
@@ -616,7 +642,7 @@ def print_hierarchy_by_path(path: str, indent: int = 0):
                 if not fields:
                     print(" " * (indent + 6) + "📭 No fields found")
                     continue
-                
+
                 # Print fields recursively
                 _print_fields_recursive(fields, indent + 6)
     
