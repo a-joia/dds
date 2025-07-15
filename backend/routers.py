@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from . import crud, schemas, deps
 from typing import List, Optional, Dict, Any
 from .crud import get_field_id_by_path, get_field_path_by_id, get_cluster_id_by_path, get_database_id_by_path, get_table_id_by_path
+from sqlalchemy.exc import IntegrityError
 
 router = APIRouter()
 
@@ -36,7 +37,19 @@ def read_tables(database_id: int, db: Session = Depends(deps.get_db)):
 # Field endpoints
 @router.post("/tables/{table_id}/fields/", response_model=schemas.FieldRead)
 def create_field(table_id: int, field: schemas.FieldCreate, db: Session = Depends(deps.get_db)):
-    return crud.create_field(db, table_id, field)
+    try:
+        return crud.create_field(db, table_id, field)
+    except IntegrityError:
+        db.rollback()
+        # Try to fetch the existing field and return it
+        existing = db.query(crud.models.Field).filter(
+            crud.models.Field.name == field.name,
+            crud.models.Field.table_id == table_id,
+            crud.models.Field.parent_id == field.parent_id
+        ).first()
+        if existing:
+            return existing
+        raise HTTPException(status_code=409, detail="Field already exists at this path (concurrent creation)")
 
 @router.get("/tables/{table_id}/fields/", response_model=List[schemas.FieldRead])
 def read_fields(table_id: int, db: Session = Depends(deps.get_db)):
@@ -67,7 +80,7 @@ def update_field_meta(field_id: int, meta: Dict[str, Any] = Body(...), db: Sessi
         raise HTTPException(status_code=404, detail="Field not found")
     if not isinstance(meta, dict):
         raise HTTPException(status_code=400, detail="meta must be a dictionary")
-    setattr(field, 'meta', meta)
+    field.meta = meta  # type: ignore
     db.commit()
     db.refresh(field)
     return field
@@ -114,7 +127,7 @@ def update_table_by_path(cluster: str, database: str, table: str, data: dict = B
     db.refresh(table_obj)
     return table_obj
 
-@router.patch("/fields/by-path/{field_path:path}/meta", response_model=schemas.FieldRead)
+@router.patch("/fields/by-path/{field_path:path}/meta", response_model=None)
 def update_field_meta_by_path(field_path: str, meta: dict = Body(...), db: Session = Depends(deps.get_db)):
     parts = field_path.split('/')
     if len(parts) < 4:
@@ -127,21 +140,26 @@ def update_field_meta_by_path(field_path: str, meta: dict = Body(...), db: Sessi
         raise HTTPException(status_code=404, detail="Field not found")
     if not isinstance(meta, dict):
         raise HTTPException(status_code=400, detail="meta must be a dictionary")
-    setattr(field, 'meta', meta)
+    if 'type' not in meta:
+        raise HTTPException(status_code=400, detail="meta must contain a 'type' key")
+    field.meta = meta  # type: ignore
     db.commit()
     db.refresh(field)
-    return field
+    return field.meta
 
 @router.get("/fields/by-path/{field_path:path}/meta")
 def get_field_meta_by_path(field_path: str, db: Session = Depends(deps.get_db)):
+    print(f"[DEBUG] field_path: {field_path}")
     parts = field_path.split('/')
     field_id = get_field_id_by_path(db, *parts)
+    print(f"[DEBUG] field_id: {field_id}")
     if field_id is None:
         raise HTTPException(status_code=404, detail="Field not found for path")
     field = db.query(crud.models.Field).filter(crud.models.Field.id == field_id).first()
     if not field:
         raise HTTPException(status_code=404, detail="Field not found")
-    return {"meta": field.meta}
+    print(f"[DEBUG] field.meta: {field.meta}")
+    return field.meta
 
 @router.post("/equivalence/")
 def add_equivalence_edge(
@@ -168,9 +186,8 @@ def remove_equivalence_edge(
     to_id = get_field_id_by_path(db, *to_parts)
     if from_id is None or to_id is None:
         raise HTTPException(status_code=404, detail="Field not found for one or both paths")
-    success = crud.delete_equivalence_edge(db, from_id, to_id)
-    if not success:
-        raise HTTPException(status_code=404, detail="Equivalence edge not found")
+    crud.delete_equivalence_edge(db, from_id, to_id)
+    # Always return success, even if the edge did not exist (idempotent)
     return {"success": True}
 
 @router.get("/fields/{field_path:path}/equivalence/")
@@ -251,6 +268,11 @@ def create_field_by_path(field_path: str, data: dict = Body(...), db: Session = 
         parent_id = get_field_id_by_path(db, cluster, database, table, *current_path)
         if parent_id is None:
             raise HTTPException(status_code=404, detail=f"Parent field '{field_names[i]}' not found")
+    # Validate meta
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=422, detail="Input should be a valid dictionary")
+    if 'type' not in data:
+        raise HTTPException(status_code=400, detail="meta must contain a 'type' key")
     # Create the field
     from . import schemas
     field_create = schemas.FieldCreate(name=field_names[-1], parent_id=parent_id, meta=data)
@@ -346,3 +368,112 @@ def get_field_info_by_path(field_path: str, db: Session = Depends(deps.get_db)):
         "table_id": field.table_id,
     }
     return info 
+
+# --- CLUSTER by-path GET and DELETE ---
+@router.get("/clusters/by-path/{cluster_path}", response_model=schemas.ClusterRead)
+def get_cluster_by_path(cluster_path: str, db: Session = Depends(deps.get_db)):
+    cluster_id = get_cluster_id_by_path(db, cluster_path)
+    if cluster_id is None:
+        raise HTTPException(status_code=404, detail="Cluster not found for path")
+    cluster = db.query(crud.models.Cluster).filter(crud.models.Cluster.id == cluster_id).first()
+    if not cluster:
+        raise HTTPException(status_code=404, detail="Cluster not found")
+    return cluster
+
+@router.delete("/clusters/by-path/{cluster_path}")
+def delete_cluster_by_path(cluster_path: str, db: Session = Depends(deps.get_db)):
+    cluster_id = get_cluster_id_by_path(db, cluster_path)
+    if cluster_id is None:
+        raise HTTPException(status_code=404, detail="Cluster not found for path")
+    crud.delete_cluster(db, cluster_id)
+    return {"success": True}
+
+# --- DATABASE by-path GET and DELETE ---
+@router.get("/databases/by-path/{cluster}/{database}", response_model=schemas.DatabaseRead)
+def get_database_by_path(cluster: str, database: str, db: Session = Depends(deps.get_db)):
+    db_id = get_database_id_by_path(db, cluster, database)
+    if db_id is None:
+        raise HTTPException(status_code=404, detail="Database not found for path")
+    db_obj = db.query(crud.models.Database).filter(crud.models.Database.id == db_id).first()
+    if not db_obj:
+        raise HTTPException(status_code=404, detail="Database not found")
+    return db_obj
+
+@router.delete("/databases/by-path/{cluster}/{database}")
+def delete_database_by_path(cluster: str, database: str, db: Session = Depends(deps.get_db)):
+    db_id = get_database_id_by_path(db, cluster, database)
+    if db_id is None:
+        raise HTTPException(status_code=404, detail="Database not found for path")
+    crud.delete_database(db, db_id)
+    return {"success": True}
+
+# --- TABLE by-path GET and DELETE ---
+@router.get("/tables/by-path/{cluster}/{database}/{table}", response_model=schemas.TableRead)
+def get_table_by_path(cluster: str, database: str, table: str, db: Session = Depends(deps.get_db)):
+    table_id = get_table_id_by_path(db, cluster, database, table)
+    if table_id is None:
+        raise HTTPException(status_code=404, detail="Table not found for path")
+    table_obj = db.query(crud.models.Table).filter(crud.models.Table.id == table_id).first()
+    if not table_obj:
+        raise HTTPException(status_code=404, detail="Table not found")
+    return table_obj
+
+@router.delete("/tables/by-path/{cluster}/{database}/{table}")
+def delete_table_by_path(cluster: str, database: str, table: str, db: Session = Depends(deps.get_db)):
+    table_id = get_table_id_by_path(db, cluster, database, table)
+    if table_id is None:
+        raise HTTPException(status_code=404, detail="Table not found for path")
+    crud.delete_table(db, table_id)
+    return {"success": True} 
+
+# --- DATABASE by-path POST ---
+@router.post("/databases/by-path/{cluster}/{database}", response_model=schemas.DatabaseRead)
+def create_database_by_path(cluster: str, database: str, db: Session = Depends(deps.get_db)):
+    cluster_id = get_cluster_id_by_path(db, cluster)
+    if cluster_id is None:
+        raise HTTPException(status_code=404, detail="Cluster not found for path")
+    # Use schemas.DatabaseCreate for validation
+    db_create = schemas.DatabaseCreate(name=database)
+    return crud.create_database(db, cluster_id, db_create)
+
+# --- TABLE by-path POST ---
+@router.post("/tables/by-path/{cluster}/{database}/{table}", response_model=schemas.TableRead)
+def create_table_by_path(cluster: str, database: str, table: str, db: Session = Depends(deps.get_db)):
+    table_id = get_table_id_by_path(db, cluster, database, table)
+    if table_id is not None:
+        raise HTTPException(status_code=400, detail="Table already exists at this path")
+    db_id = get_database_id_by_path(db, cluster, database)
+    if db_id is None:
+        raise HTTPException(status_code=404, detail="Database not found for path")
+    # Use schemas.TableCreate for validation
+    table_create = schemas.TableCreate(name=table)
+    return crud.create_table(db, db_id, table_create) 
+
+# --- FIELD by-path GET ---
+@router.get("/fields/by-path/{field_path:path}", response_model=schemas.FieldRead)
+def get_field_by_path(field_path: str, db: Session = Depends(deps.get_db)):
+    parts = field_path.split('/')
+    if len(parts) < 4:
+        raise HTTPException(status_code=400, detail="Field path must include at least cluster/database/table/field")
+    field_id = get_field_id_by_path(db, *parts)
+    if field_id is None:
+        raise HTTPException(status_code=404, detail="Field not found for path")
+    field = db.query(crud.models.Field).filter(crud.models.Field.id == field_id).first()
+    if not field:
+        raise HTTPException(status_code=404, detail="Field not found")
+    return field 
+
+# --- FIELD by-path DELETE ---
+@router.delete("/fields/by-path/{field_path:path}")
+def delete_field_by_path(field_path: str, db: Session = Depends(deps.get_db)):
+    parts = field_path.split('/')
+    if len(parts) < 4:
+        raise HTTPException(status_code=400, detail="Field path must include at least cluster/database/table/field")
+    field_id = get_field_id_by_path(db, *parts)
+    if field_id is None:
+        raise HTTPException(status_code=404, detail="Field not found for path")
+    from .crud import delete_field
+    delete_field(db, field_id)
+    return {"success": True}
+
+# PATCH /fields/by-path/{field_path}/meta should return only the meta dict (already implemented as return {**field.meta}) 

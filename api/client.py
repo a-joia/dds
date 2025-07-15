@@ -1,61 +1,97 @@
 import requests
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
+
+class APIClientError(Exception):
+    """Custom exception for API client errors."""
+    pass
 
 class DBDescClient:
-    def __init__(self, base_url: str = "http://localhost:8000"):
-        self.base_url = base_url
+    def __init__(self, base_url: str = "http://backend:8000"):
+        self.base_url = base_url.rstrip("/")
 
+    def _handle_response(self, resp: requests.Response) -> Any:
+        try:
+            resp.raise_for_status()
+            return resp.json()
+        except requests.HTTPError as e:
+            try:
+                detail = resp.json().get('detail', resp.text)
+            except Exception:
+                detail = resp.text
+            raise APIClientError(f"HTTP {resp.status_code}: {detail}") from e
+        except Exception as e:
+            raise APIClientError(f"Non-JSON response: {resp.text}") from e
+
+    # --- Cluster ---
     def create_cluster(self, name: str) -> Dict[str, Any]:
-        return requests.post(f"{self.base_url}/clusters/", json={"name": name}).json()
+        """Create a new cluster."""
+        resp = requests.post(f"{self.base_url}/clusters/", json={"name": name})
+        return self._handle_response(resp)
 
     def get_clusters(self) -> List[Dict[str, Any]]:
-        return requests.get(f"{self.base_url}/clusters/").json()
+        """List all clusters."""
+        resp = requests.get(f"{self.base_url}/clusters/")
+        return self._handle_response(resp)
 
     def delete_cluster(self, cluster_id: int) -> Any:
-        return requests.delete(f"{self.base_url}/clusters/{cluster_id}").json()
+        """Delete a cluster by ID."""
+        resp = requests.delete(f"{self.base_url}/clusters/{cluster_id}")
+        return self._handle_response(resp)
 
     def update_cluster(self, cluster_id: int, name: str) -> Any:
-        # First get the cluster to find its name
+        """Update a cluster's name by ID."""
         clusters = self.get_clusters()
-        cluster_name = None
-        for c in clusters:
-            if c['id'] == cluster_id:
-                cluster_name = c['name']
-                break
+        cluster_name = next((c['name'] for c in clusters if c['id'] == cluster_id), None)
         if not cluster_name:
-            raise ValueError(f"Cluster with ID {cluster_id} not found")
-        return requests.patch(f"{self.base_url}/clusters/by-path/{cluster_name}", json={"name": name}).json()
+            raise APIClientError(f"Cluster with ID {cluster_id} not found")
+        resp = requests.patch(f"{self.base_url}/clusters/by-path/{cluster_name}", json={"name": name})
+        return self._handle_response(resp)
 
+    # --- Database ---
     def create_database(self, cluster_id: int, name: str) -> Dict[str, Any]:
-        return requests.post(f"{self.base_url}/clusters/{cluster_id}/databases/", json={"name": name}).json()
+        """Create a database in a cluster by cluster ID."""
+        resp = requests.post(f"{self.base_url}/clusters/{cluster_id}/databases/", json={"name": name})
+        return self._handle_response(resp)
 
     def get_databases(self, cluster_id: int) -> List[Dict[str, Any]]:
-        return requests.get(f"{self.base_url}/clusters/{cluster_id}/databases/").json()
+        """List all databases in a cluster by cluster ID."""
+        resp = requests.get(f"{self.base_url}/clusters/{cluster_id}/databases/")
+        return self._handle_response(resp)
 
     def delete_database(self, database_id: int) -> Any:
-        return requests.delete(f"{self.base_url}/databases/{database_id}").json()
+        """Delete a database by ID."""
+        resp = requests.delete(f"{self.base_url}/databases/{database_id}")
+        return self._handle_response(resp)
 
     def update_database(self, database_id: int, name: str) -> Any:
-        # First get the database to find its cluster and name
+        """Update a database's name by ID."""
         clusters = self.get_clusters()
         for c in clusters:
             dbs = self.get_databases(c['id'])
             for db in dbs:
                 if db['id'] == database_id:
-                    return requests.patch(f"{self.base_url}/databases/by-path/{c['name']}/{db['name']}", json={"name": name}).json()
-        raise ValueError(f"Database with ID {database_id} not found")
+                    resp = requests.patch(f"{self.base_url}/databases/by-path/{c['name']}/{db['name']}", json={"name": name})
+                    return self._handle_response(resp)
+        raise APIClientError(f"Database with ID {database_id} not found")
 
+    # --- Table ---
     def create_table(self, database_id: int, name: str) -> Dict[str, Any]:
-        return requests.post(f"{self.base_url}/databases/{database_id}/tables/", json={"name": name}).json()
+        """Create a table in a database by database ID."""
+        resp = requests.post(f"{self.base_url}/databases/{database_id}/tables/", json={"name": name})
+        return self._handle_response(resp)
 
     def get_tables(self, database_id: int) -> List[Dict[str, Any]]:
-        return requests.get(f"{self.base_url}/databases/{database_id}/tables/").json()
+        """List all tables in a database by database ID."""
+        resp = requests.get(f"{self.base_url}/databases/{database_id}/tables/")
+        return self._handle_response(resp)
 
     def delete_table(self, table_id: int) -> Any:
-        return requests.delete(f"{self.base_url}/tables/{table_id}").json()
+        """Delete a table by ID."""
+        resp = requests.delete(f"{self.base_url}/tables/{table_id}")
+        return self._handle_response(resp)
 
     def update_table(self, table_id: int, name: str) -> Any:
-        # First get the table to find its cluster, database and name
+        """Update a table's name by ID."""
         clusters = self.get_clusters()
         for c in clusters:
             dbs = self.get_databases(c['id'])
@@ -63,170 +99,95 @@ class DBDescClient:
                 tables = self.get_tables(db['id'])
                 for table in tables:
                     if table['id'] == table_id:
-                        return requests.patch(f"{self.base_url}/tables/by-path/{c['name']}/{db['name']}/{table['name']}", json={"name": name}).json()
-        raise ValueError(f"Table with ID {table_id} not found")
+                        resp = requests.patch(f"{self.base_url}/tables/by-path/{c['name']}/{db['name']}/{table['name']}", json={"name": name})
+                        return self._handle_response(resp)
+        raise APIClientError(f"Table with ID {table_id} not found")
 
+    # --- Field ---
     def create_field(self, table_id: int, name: str, parent_id: Optional[int] = None, meta: Optional[dict] = None) -> Dict[str, Any]:
+        """Create a field in a table by table ID."""
         data: Dict[str, Any] = {"name": name}
         if parent_id is not None:
             data["parent_id"] = parent_id
         if meta is not None:
             data["meta"] = meta
-        return requests.post(f"{self.base_url}/tables/{table_id}/fields/", json=data).json()
+        resp = requests.post(f"{self.base_url}/tables/{table_id}/fields/", json=data)
+        return self._handle_response(resp)
 
     def get_fields(self, table_id: int) -> List[Dict[str, Any]]:
-        return requests.get(f"{self.base_url}/tables/{table_id}/fields/").json()
+        """List all fields in a table by table ID."""
+        resp = requests.get(f"{self.base_url}/tables/{table_id}/fields/")
+        return self._handle_response(resp)
 
     def delete_field(self, field_id: int) -> Any:
-        return requests.delete(f"{self.base_url}/fields/{field_id}").json()
+        """Delete a field by ID."""
+        resp = requests.delete(f"{self.base_url}/fields/{field_id}")
+        return self._handle_response(resp)
 
-    # Note: Field name updates are not supported by the backend (only meta updates)
-    # def update_field(self, field_id: int, name: str) -> Any:
-    #     return requests.patch(f"{self.base_url}/fields/{field_id}", json={"name": name}).json()
+    def update_field_meta(self, field_id: int, meta: dict) -> Any:
+        """Update a field's meta by field ID."""
+        resp = requests.patch(f"{self.base_url}/fields/{field_id}/meta", json=meta)
+        return self._handle_response(resp)
 
+    # --- Edge ---
     def create_edge(self, from_field_id: int, to_field_id: int, type: str) -> Dict[str, Any]:
+        """Create an edge between two fields."""
         data = {"from_field_id": from_field_id, "to_field_id": to_field_id, "type": type}
-        return requests.post(f"{self.base_url}/edges/", json=data).json()
+        resp = requests.post(f"{self.base_url}/edges/", json=data)
+        return self._handle_response(resp)
 
     def get_edges(self, field_id: int) -> List[Dict[str, Any]]:
-        return requests.get(f"{self.base_url}/fields/{field_id}/edges/").json()
+        """List all edges connected to a field by field ID."""
+        resp = requests.get(f"{self.base_url}/fields/{field_id}/edges/")
+        return self._handle_response(resp)
 
+    def delete_edge(self, edge_id: int) -> Any:
+        """Delete an edge by edge ID."""
+        resp = requests.delete(f"{self.base_url}/edges/{edge_id}")
+        return self._handle_response(resp)
+
+    # --- Path-based helpers ---
     def create_database_by_path(self, path: str) -> Dict[str, Any]:
-        """
-        Create a database by path (cluster/database).
-        
-        Args:
-            path: Path in format "cluster/database"
-            
-        Returns:
-            Created database object
-            
-        Raises:
-            ValueError: If cluster doesn't exist or path format is invalid
-        """
+        """Create a database by path (cluster/database)."""
         parts = path.split('/')
         if len(parts) != 2:
-            raise ValueError(f"Invalid path format: '{path}'. Expected format: 'cluster/database'")
-        
+            raise APIClientError(f"Invalid path format: '{path}'. Expected format: 'cluster/database'")
         cluster_name, database_name = parts
-        
-        # Check if cluster exists
         clusters = self.get_clusters()
-        cluster = None
-        for c in clusters:
-            if c['name'] == cluster_name:
-                cluster = c
-                break
-        
+        cluster = next((c for c in clusters if c['name'] == cluster_name), None)
         if not cluster:
-            available_clusters = [c['name'] for c in clusters]
-            raise ValueError(
-                f"Cluster '{cluster_name}' does not exist.\n"
-                f"Available clusters: {available_clusters}\n"
-                f"Path provided: '{path}'\n"
-                f"Please create the cluster first or use an existing cluster name."
-            )
-        
-        # Create database in the cluster
+            raise APIClientError(f"Cluster '{cluster_name}' does not exist.")
         return self.create_database(cluster['id'], database_name)
 
     def create_table_by_path(self, path: str) -> Dict[str, Any]:
-        """
-        Create a table by path (cluster/database/table).
-        
-        Args:
-            path: Path in format "cluster/database/table"
-            
-        Returns:
-            Created table object
-            
-        Raises:
-            ValueError: If cluster or database doesn't exist or path format is invalid
-        """
+        """Create a table by path (cluster/database/table)."""
         parts = path.split('/')
         if len(parts) != 3:
-            raise ValueError(f"Invalid path format: '{path}'. Expected format: 'cluster/database/table'")
-        
+            raise APIClientError(f"Invalid path format: '{path}'. Expected format: 'cluster/database/table'")
         cluster_name, database_name, table_name = parts
-        
-        # Check if cluster exists
         clusters = self.get_clusters()
-        cluster = None
-        for c in clusters:
-            if c['name'] == cluster_name:
-                cluster = c
-                break
-        
+        cluster = next((c for c in clusters if c['name'] == cluster_name), None)
         if not cluster:
-            available_clusters = [c['name'] for c in clusters]
-            raise ValueError(
-                f"Cluster '{cluster_name}' does not exist.\n"
-                f"Available clusters: {available_clusters}\n"
-                f"Path provided: '{path}'\n"
-                f"Please create the cluster first or use an existing cluster name."
-            )
-        
-        # Check if database exists
+            raise APIClientError(f"Cluster '{cluster_name}' does not exist.")
         databases = self.get_databases(cluster['id'])
-        database = None
-        for db in databases:
-            if db['name'] == database_name:
-                database = db
-                break
-        
+        database = next((db for db in databases if db['name'] == database_name), None)
         if not database:
-            available_databases = [db['name'] for db in databases]
-            raise ValueError(
-                f"Database '{database_name}' does not exist in cluster '{cluster_name}'.\n"
-                f"Available databases in cluster '{cluster_name}': {available_databases}\n"
-                f"Path provided: '{path}'\n"
-                f"Please create the database first or use an existing database name."
-            )
-        
-        # Create table in the database
+            raise APIClientError(f"Database '{database_name}' does not exist in cluster '{cluster_name}'.")
         return self.create_table(database['id'], table_name)
 
     def create_field_by_path(self, path: str, meta: Optional[dict] = None) -> Dict[str, Any]:
-        """
-        Create a field by path (cluster/database/table/field or cluster/database/table/field/subfield/...).
-        
-        Args:
-            path: Path in format "cluster/database/table/field" or "cluster/database/table/field/subfield/..."
-            meta: Optional metadata for the field
-            
-        Returns:
-            Created field object
-            
-        Raises:
-            ValueError: If cluster, database, table, or any parent field doesn't exist or path format is invalid
-        """
+        """Create a field by path (cluster/database/table/field[/subfield...])."""
         parts = path.split('/')
         if len(parts) < 4:
-            raise ValueError(
-                f"Invalid path format: '{path}'. "
-                f"Expected format: 'cluster/database/table/field' or 'cluster/database/table/field/subfield/...'"
-            )
-        
-        # Use the server-side path-based endpoint
+            raise APIClientError(f"Invalid path format: '{path}'. Expected format: 'cluster/database/table/field[/subfield...]'")
         data = meta if meta is not None else {}
         resp = requests.post(f"{self.base_url}/fields/by-path/{path}", json=data)
-        if not resp.ok:
-            # Try to provide a helpful error message
-            try:
-                error_detail = resp.json().get('detail', resp.text)
-                raise ValueError(error_detail)
-            except:
-                raise ValueError(f"Failed to create field: {resp.text}")
-        
-        return resp.json()
+        return self._handle_response(resp)
 
     def list_field_paths_by_table_path(self, cluster: str, database: str, table: str) -> List[str]:
-        """
-        List all field and subfield paths under the specified table.
-        """
+        """List all field and subfield paths under the specified table."""
         resp = requests.get(f"{self.base_url}/fields/by-table-path/{cluster}/{database}/{table}")
-        resp.raise_for_status()
-        return resp.json().get("paths", [])
+        return self._handle_response(resp).get("paths", [])
 
     def list_field_paths_with_empty_description_by_table_path(self, cluster: str, database: str, table: str) -> List[str]:
         """
@@ -244,13 +205,92 @@ class DBDescClient:
         resp.raise_for_status()
         return resp.json().get("paths", [])
 
-    def get_field_info_by_path(self, path: str) -> dict:
-        """
-        Get all information about a field or subfield node given its path (cluster/database/table/field[/subfield...]).
-        """
-        resp = requests.get(f"{self.base_url}/fields/by-path/{path}/info")
-        resp.raise_for_status()
-        return resp.json()
+    # --- Path-based DELETE ---
+    def delete_cluster_by_path(self, cluster_name: str) -> Any:
+        """Delete a cluster by name (path-based)."""
+        resp = requests.delete(f"{self.base_url}/clusters/by-path/{cluster_name}")
+        return self._handle_response(resp)
+
+    def delete_database_by_path(self, cluster: str, database: str) -> Any:
+        """Delete a database by path (cluster/database)."""
+        resp = requests.delete(f"{self.base_url}/databases/by-path/{cluster}/{database}")
+        return self._handle_response(resp)
+
+    def delete_table_by_path(self, cluster: str, database: str, table: str) -> Any:
+        """Delete a table by path (cluster/database/table)."""
+        resp = requests.delete(f"{self.base_url}/tables/by-path/{cluster}/{database}/{table}")
+        return self._handle_response(resp)
+
+    def delete_field_by_path(self, path: str) -> Any:
+        """Delete a field by path (cluster/database/table/field[/subfield...])."""
+        resp = requests.delete(f"{self.base_url}/fields/by-path/{path}")
+        return self._handle_response(resp)
+
+    # --- Path-based UPDATE ---
+    def update_table_by_path(self, cluster: str, database: str, table: str, data: dict) -> Any:
+        """Update a table by path (cluster/database/table)."""
+        resp = requests.patch(f"{self.base_url}/tables/by-path/{cluster}/{database}/{table}", json=data)
+        return self._handle_response(resp)
+
+    # --- Path-based GET helpers ---
+    def get_tables_by_database_name(self, cluster: str, database: str) -> List[dict]:
+        """Get all tables in a database by cluster/database name."""
+        # Find database ID by name
+        clusters = self.get_clusters()
+        cluster_obj = next((c for c in clusters if c['name'] == cluster), None)
+        if not cluster_obj:
+            raise APIClientError(f"Cluster '{cluster}' not found")
+        dbs = self.get_databases(cluster_obj['id'])
+        db_obj = next((db for db in dbs if db['name'] == database), None)
+        if not db_obj:
+            raise APIClientError(f"Database '{database}' not found in cluster '{cluster}'")
+        return self.get_tables(db_obj['id'])
+
+    def get_databases_by_cluster_name(self, cluster: str) -> List[dict]:
+        """Get all databases in a cluster by cluster name."""
+        clusters = self.get_clusters()
+        cluster_obj = next((c for c in clusters if c['name'] == cluster), None)
+        if not cluster_obj:
+            raise APIClientError(f"Cluster '{cluster}' not found")
+        return self.get_databases(cluster_obj['id'])
+
+    def get_field_by_path(self, path: str) -> dict:
+        """Get all information about a field or subfield node given its path (cluster/database/table/field[/subfield...])."""
+        resp = requests.get(f"{self.base_url}/fields/by-path/{path}")
+        return self._handle_response(resp)
+
+    def get_field_meta_by_path(self, path: str) -> dict:
+        """Get the meta dictionary for a field by path."""
+        resp = requests.get(f"{self.base_url}/fields/by-path/{path}/meta")
+        return self._handle_response(resp)
+
+    def patch_field_meta_by_path(self, path: str, meta: dict) -> dict:
+        """Patch (update) the meta dictionary for a field by path."""
+        resp = requests.patch(f"{self.base_url}/fields/by-path/{path}/meta", json=meta)
+        return self._handle_response(resp)
+
+    # --- Edge/Equivalence helpers ---
+    def get_equivalents(self, field_path: str) -> List[dict]:
+        """Get all equivalent fields (edges) for a field by path."""
+        resp = requests.get(f"{self.base_url}/fields/{field_path}/equivalence/")
+        data = self._handle_response(resp)
+        return data.get('equivalents', [])
+
+    def add_equivalence(self, from_path: str, to_path: str) -> dict:
+        """Add an equivalence edge between two fields by path."""
+        resp = requests.post(f"{self.base_url}/equivalence/", params={
+            'from_path': from_path,
+            'to_path': to_path
+        })
+        return self._handle_response(resp)
+
+    def remove_equivalence(self, from_path: str, to_path: str) -> dict:
+        """Remove an equivalence edge between two fields by path."""
+        resp = requests.delete(f"{self.base_url}/equivalence/", params={
+            'from_path': from_path,
+            'to_path': to_path
+        })
+        return self._handle_response(resp)
 
 BASE_URL = 'http://localhost:8000'
 

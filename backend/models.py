@@ -42,11 +42,13 @@ class Field(Base):
     subfields = relationship('Field', back_populates='parent', cascade="all, delete-orphan")
     meta = Column(JSON, default={})
     
-    # Indexes for faster lookups
+    # Indexes and unique constraint for faster lookups and to prevent duplicates
     __table_args__ = (
         Index('idx_field_table_id', 'table_id'),
         Index('idx_field_parent_id', 'parent_id'),
         Index('idx_field_table_parent_name', 'table_id', 'parent_id', 'name'),
+        # Unique constraint to prevent duplicate fields with same name, table, and parent
+        Index('uq_field_table_parent_name_unique', 'table_id', 'parent_id', 'name', unique=True),
     )
 
 class Edge(Base):

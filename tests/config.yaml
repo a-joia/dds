@@ -1,0 +1,3 @@
+scripts:
+  - path_client_test.py
+  - backend_api_test.py
