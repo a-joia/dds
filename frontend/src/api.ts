@@ -189,4 +189,10 @@ export async function fetchTableGraph(tableId: number): Promise<TableGraphData> 
   const res = await fetch(`${API_URL}/tables/${tableId}/graph/`);
   if (!res.ok) throw new Error('Failed to fetch table graph');
   return res.json();
+}
+
+export async function fetchFieldByPath(fieldPath: string): Promise<Field> {
+  const res = await fetch(`${API_URL}/fields/by-path/${encodeURIComponent(fieldPath)}`);
+  if (!res.ok) throw new Error('Failed to fetch field');
+  return res.json();
 } 

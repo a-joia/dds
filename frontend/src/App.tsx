@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import './App.css';
-import { Cluster, Database, Table, Field, fetchClusters, fetchDatabases, fetchTables, fetchFields, fetchEquivalents, addEquivalence, removeEquivalence, EquivalentNode, updateFieldMetaByPath, fetchPossiblyEquivalents, addPossiblyEquivalence, removePossiblyEquivalence, fetchTableGraph, TableGraphData } from './api';
+import { Cluster, Database, Table, Field, fetchClusters, fetchDatabases, fetchTables, fetchFields, fetchEquivalents, addEquivalence, removeEquivalence, EquivalentNode, updateFieldMetaByPath, fetchPossiblyEquivalents, addPossiblyEquivalence, removePossiblyEquivalence, fetchTableGraph, TableGraphData, fetchFieldByPath } from './api';
 import { GraphView } from './GraphView';
 import ReactMarkdown from 'react-markdown';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
@@ -37,6 +37,7 @@ const FIELD_FONT = 'Montserrat, Inter, Segoe UI, Arial, sans-serif';
 function FieldPage() {
   const { cluster, database, table, '*': fieldPath } = useParams();
   const navigate = useNavigate();
+  const [field, setField] = React.useState<Field | null>(null);
   const [meta, setMeta] = React.useState<Record<string, any> | null>(null);
   const [originalMeta, setOriginalMeta] = React.useState<Record<string, any> | null>(null);
   const [loading, setLoading] = React.useState(true);
@@ -53,15 +54,10 @@ function FieldPage() {
   React.useEffect(() => {
     setLoading(true);
     setError(null);
-    fetch(`http://localhost:8000/fields/by-path/${encodeURIComponent(fullPath)}/meta`)
-      .then(res => {
-        console.log('Fetch status:', res.status);
-        if (!res.ok) throw new Error('Failed to load');
-        return res.json();
-      })
-      .then(data => {
-        console.log('Field meta response:', data);
-        let meta = data.meta || {};
+    fetchFieldByPath(fullPath)
+      .then(fieldObj => {
+        setField(fieldObj);
+        let meta = fieldObj.meta || {};
         if (!('description' in meta)) {
           meta.description = '';
         }
@@ -119,7 +115,7 @@ function FieldPage() {
         )}
       </div>
       <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, boxShadow: '0 2px 8px rgba(0,0,0,0.03)', padding: '28px 48px', position: 'relative', width: '90%', maxWidth: 900, margin: '0 auto' }}>
-        <div style={{ fontSize: 26, fontWeight: 800, color: '#2563eb', marginBottom: 8 }}>{fieldPath ? fieldPath.split('/').slice(-1)[0] : table}</div>
+        <div style={{ fontSize: 26, fontWeight: 800, color: '#2563eb', marginBottom: 8 }}>{field ? field.name : (fieldPath ? fieldPath.split('/').slice(-1)[0] : table)}</div>
         <div style={{ color: '#6b7280', fontSize: 15, marginBottom: 18 }}>
           Path: <span style={{ color: '#222' }}>{fullPath}</span>
         </div>
@@ -230,32 +226,7 @@ function FieldPage() {
               <div style={{ fontWeight: 600, color: '#374151', marginBottom: 4 }}>Examples</div>
               <div style={{ color: '#222', fontSize: 15, background: '#f8fafc', borderRadius: 6, padding: '7px 12px', minHeight: 28, marginBottom: 16 }}>
                 {meta.examples && meta.examples.trim() !== '' ? (
-                  <ReactMarkdown
-                    components={{
-                      code({node, className, children, ...props}) {
-                        const match = /language-(\w+)/.exec(className || '');
-                        const isInline = (props && 'inline' in props) ? (props as any).inline : false;
-                        function omitRef(props: any) {
-                          const { ref, ...rest } = props;
-                          return rest;
-                        }
-                        return !isInline && match ? (
-                          <SyntaxHighlighter
-                            style={dracula as any}
-                            language={match[1]}
-                            PreTag="div"
-                            {...omitRef(props)}
-                          >
-                            {String(children).replace(/\n$/, '')}
-                          </SyntaxHighlighter>
-                        ) : (
-                          <code className={className} {...props}>{children}</code>
-                        );
-                      }
-                    }}
-                  >
-                    {meta.examples}
-                  </ReactMarkdown>
+                  <ReactMarkdown>{meta.examples}</ReactMarkdown>
                 ) : (
                   <span style={{ color: '#888' }}>No examples available</span>
                 )}
@@ -568,7 +539,7 @@ function App() {
         background: SIDEBAR_BG,
         color: TEXT_COLOR,
         padding: 0,
-        overflowY: 'auto',
+        overflow: 'hidden',
         borderRight: '1px solid #22304a',
         display: 'flex',
         flexDirection: 'column',
@@ -577,7 +548,7 @@ function App() {
         <div style={{ padding: '28px 24px 16px 24px', borderBottom: '1px solid #22304a', fontWeight: 700, fontSize: 22, letterSpacing: 1, background: 'rgba(30,42,56,0.95)', zIndex: 2 }}>
           Clusters
         </div>
-        {/* Make this area scrollable */}
+        {/* Scrollable cluster list */}
         <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
           {loading && <div style={{ padding: 24, color: SUBTEXT_COLOR }}>Loading...</div>}
           {error && <div style={{ color: '#ff6b6b', padding: 24 }}>{error}</div>}
@@ -662,12 +633,9 @@ function App() {
             ))}
           </ul>
         </div>
-        {/* Team name at the bottom */}
+        {/* Fixed bottom text */}
         <div style={{
-          position: 'absolute',
-          left: 0,
-          right: 0,
-          bottom: 32,
+          padding: '24px 0 32px 0',
           textAlign: 'center',
           color: '#b3c6e0',
           fontWeight: 700,
@@ -675,6 +643,8 @@ function App() {
           letterSpacing: 2,
           opacity: 0.7,
           userSelect: 'none',
+          background: SIDEBAR_BG,
+          zIndex: 2,
         }}>
           ACCIA Database Explorer
         </div>
